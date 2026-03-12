@@ -59,13 +59,11 @@ def chunk_quasar_fwd(
     eps = 1e-8
     alpha = (1 - torch.exp(-beta.view(-1, 1, 1, 1) * k_norm_sq)) / (k_norm_sq + eps)  # [B, H, NT, BT, 1]
     
-    # Vectorized intra-chunk computation for ALL chunks
     # KK^T = K @ K^T for all chunks
     # [B, H, NT, BT, S] @ [B, H, NT, S, BT] -> [B, H, NT, BT, BT]
     KK_t = torch.matmul(k_chunks, k_chunks.transpose(-2, -1))  # [B, H, NT, BT, BT]
     
     # M = tril(alpha * KK^T) for all chunks
-    # alpha is [B, H, NT, BT, 1], KK_t is [B, H, NT, BT, BT]
     alpha_expanded = alpha.expand(-1, -1, -1, -1, BT)  # [B, H, NT, BT, BT]
     M = (alpha_expanded * KK_t).tril(diagonal=-1)  # [B, H, NT, BT, BT]
     
