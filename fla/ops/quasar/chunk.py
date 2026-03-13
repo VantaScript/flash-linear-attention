@@ -26,10 +26,10 @@ def chunk_quasar_fwd(
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """
-    Simplified chunk-wise QuasarAttention forward pass using PyTorch operations.
-    
-    This implementation uses PyTorch for the complex matrix operations and
-    can be optimized with Triton kernels for specific sub-operations later.
+    Chunk-wise QuasarAttention forward pass using kernelized gate computation.
+
+    This implementation replaces pure PyTorch alpha/beta computation with a kernelized gate
+    to improve performance and numerical stability.
     """
     B, T, H, S = q.shape
     BT = chunk_size
@@ -53,13 +53,17 @@ def chunk_quasar_fwd(
     k_chunks = k.view(B, H, NT, BT, S)
     v_chunks = v.view(B, H, NT, BT, S)
     
-    # Compute alpha = (1 - exp(-beta * lambda)) / (lambda + eps)
-    # lambda = ||k||^2
+    # Compute lambda_t = ||k||^2 for each chunk
     k_norm_sq = (k_chunks ** 2).sum(dim=-1, keepdim=True)  # [B, H, NT, BT, 1]
-    eps = 1e-8
-    alpha = (1 - torch.exp(-beta.view(-1, 1, 1, 1) * k_norm_sq)) / (k_norm_sq + eps)  # [B, H, NT, BT, 1]
     
-    # KK^T = K @ K^T for all chunks
+    # Use kernelized gate to compute alpha
+    alpha = fused_quasar_gate(
+        lambda_t=k_norm_sq,
+        beta=beta.view(-1, 1, 1, 1),  # Expand to match shape
+        output_dtype=q.dtype
+    )  # [B, H, NT, BT, 1]
+    
+    # Compute KK^T = K @ K^T for all chunks
     # [B, H, NT, BT, S] @ [B, H, NT, S, BT] -> [B, H, NT, BT, BT]
     KK_t = torch.matmul(k_chunks, k_chunks.transpose(-2, -1))  # [B, H, NT, BT, BT]
     
@@ -205,7 +209,7 @@ def chunk_quasar(
     """
     Chunk-wise QuasarAttention forward pass with autograd support.
     
-    Implements the chunk-wise parallel algorithm for QuasarAttention.
+    Implements the chunk-wise parallel algorithm for QuasarAttention using kernelized gate.
     
     Args:
         q (torch.Tensor): Query tensor of shape [B, T, H, S]
@@ -221,3 +225,7 @@ def chunk_quasar(
         final_state (torch.Tensor | None): Final state tensor of shape [B, H, S, S] if output_final_state
     """
     return ChunkQuasarFunction.apply(q, k, v, beta, initial_state, output_final_state, cu_seqlens)
+
+
+# Import gate module to provide fused gate function
+from fla.ops.quasar.gate import fused_quasar_gate
