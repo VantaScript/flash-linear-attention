@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 import triton
 import triton.language as tl
 
@@ -9,7 +8,7 @@ from fla.utils import IS_AMD, autocast_custom_bwd, autocast_custom_fwd, autotune
 
 BS_LIST = [32, 64] if check_shared_mem() else [16, 32]
 BT_LIST_AUTOTUNE = [32, 64, 128]
-NUM_WARPS_AUTOTUNE = [4, 8, 16, 32]  # Removed IS_AMD condition since triton.language has no 'is_amd'
+NUM_WARPS_AUTOTUNE = [2, 4, 8, 16] if IS_AMD else [4, 8, 16, 32]
 
 
 @input_guard
